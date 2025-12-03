@@ -15,19 +15,16 @@ ARTIFACTS_DIR = BASE_DIR / "artifacts"
 PROMPT_LOG_DIR = ARTIFACTS_DIR / "prompts"
 OUTPUT_DIR = BASE_DIR / "outputs"
 LOG_DIR = BASE_DIR / "logs"
-DATA_DIR = BASE_DIR / "data"
-PDF_DIR = DATA_DIR / "pdf"
 
-for directory in (ARTIFACTS_DIR, PROMPT_LOG_DIR, OUTPUT_DIR, LOG_DIR, DATA_DIR, PDF_DIR):
+for directory in (ARTIFACTS_DIR, PROMPT_LOG_DIR, OUTPUT_DIR, LOG_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 
 class LLMConfig(BaseModel):
-    provider: str = Field(default=os.getenv("PRIMARY_LLM_PROVIDER", "groq"))
+    provider: str = Field(default="groq")
     groq_api_key: Optional[str] = Field(default=os.getenv("GROQ_API_KEY"))
     groq_api_key_2: Optional[str] = Field(default=os.getenv("GROQ_API_KEY_2"))
     groq_api_key_3: Optional[str] = Field(default=os.getenv("GROQ_API_KEY_3"))
-    openai_api_key: Optional[str] = Field(default=os.getenv("OPENAI_API_KEY"))
     primary_model: str = Field(default=os.getenv("PRIMARY_MODEL", "llama-3.3-70b-versatile"))
     validation_model: str = Field(default=os.getenv("VALIDATION_MODEL", "llama-3.3-70b-versatile"))
     temperature: float = Field(default=float(os.getenv("LLM_TEMPERATURE", "0.1")))

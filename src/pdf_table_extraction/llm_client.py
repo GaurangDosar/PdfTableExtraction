@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from groq import Groq
-from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 from .config import LLMConfig
 from .utils import logger, PromptLogger
@@ -22,19 +20,14 @@ class LLMClient:
         for api_key in config.get_groq_api_keys():
             self._groq_clients.append(Groq(api_key=api_key))
         
+        if not self._groq_clients:
+            raise ValueError("At least one GROQ_API_KEY must be configured")
+        
         self._current_groq_index = 0
-        self._openai = OpenAI(api_key=config.openai_api_key) if config.openai_api_key else None
 
     def chat(self, messages: List[ChatMessage], *, model: Optional[str] = None, metadata: Dict[str, Any] | None = None) -> str:
         model_name = model or self.config.primary_model
-        provider = self._resolve_provider(model_name)
-        
-        if provider == "groq" and self._groq_clients:
-            content = self._call_groq_with_failover(model_name, messages)
-        elif provider == "openai" and self._openai:
-            content = self._call_openai(model_name, messages)
-        else:
-            raise ValueError("No valid provider configured for the requested model")
+        content = self._call_groq_with_failover(model_name, messages)
         
         content = content or ""
         prompt_text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
@@ -98,32 +91,5 @@ class LLMClient:
                 f"Last error: {last_error}"
             )
     
-    @retry(wait=wait_fixed(2), stop=stop_after_attempt(3))
-    def _call_openai(self, model_name: str, messages: List[ChatMessage]) -> str:
-        """Call OpenAI API with retries"""
-        logger.info(f"Calling openai model {model_name}")
-        completion = self._openai.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_output_tokens,
-        )
-        return completion.choices[0].message.content
-
-    def _resolve_provider(self, model_name: str) -> str:
-        if "llama" in model_name or self.config.provider == "groq":
-            if not self._groq_clients:
-                raise ValueError("Groq provider requested but no GROQ_API_KEY configured")
-            return "groq"
-        if self.config.provider == "openai" or "gpt" in model_name:
-            if not self._openai:
-                raise ValueError("OpenAI provider requested but OPENAI_API_KEY missing")
-            return "openai"
-        if self._groq_clients:
-            return "groq"
-        if self._openai:
-            return "openai"
-        raise ValueError("No LLM provider available")
-
 
 __all__ = ["LLMClient"]

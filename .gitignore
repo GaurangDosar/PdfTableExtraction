@@ -47,7 +47,8 @@ artifacts/
 logs/
 *.log
 
-# Data files
+# Test PDFs (keep your own PDFs locally, don't commit them)
+*.pdf
 data/
 *.pdf
 *.csv
