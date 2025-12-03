@@ -183,22 +183,6 @@ PdfTableExtraction/
 - Duplicate detection with frequency counts
 - Severity-based prioritization
 
----
-
-## 📈 Performance Metrics
-
-| Metric | Value |
-|--------|-------|
-| **Processing Time** | ~3 seconds per PDF |
-| **Tables Extracted** | 4 tables |
-| **Rows Generated** | 15 rows (from 12 raw) |
-| **LLM API Calls** | 5 (4 normalize + 1 validate) |
-| **Token Usage (per table)** | ~1,800 tokens |
-| **API Cost (Groq free tier)** | $0.00 |
-| **Success Rate** | 100% |
-| **Token Reduction** | 66% (vs. original 3-call design) |
-
----
 
 ## 🌐 Cloud Deployment Architecture
 
