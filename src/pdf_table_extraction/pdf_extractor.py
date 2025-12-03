@@ -63,6 +63,9 @@ class PDFExtractor:
         tables = []
         
         try:
+            # Extract full page text for table title detection
+            page_text = page.get_text()
+            
             # Find all tables on the page
             table_finder = page.find_tables()
             
@@ -84,14 +87,18 @@ class PDFExtractor:
                     for row in table_data[1:]
                 ]
                 
+                # Try to extract table title from text above the table
+                table_title = self._extract_table_title(page_text, table, idx)
+                
                 table_id = f"page-{page_number}-table-{idx}"
                 tables.append({
                     'table_id': table_id,
                     'page_number': page_number,
+                    'table_title': table_title,  # Add table title
                     'headers': headers,
                     'rows': rows,
                 })
-                logger.info(f"Extracted {table_id}: {len(headers)} cols, {len(rows)} rows")
+                logger.info(f"Extracted {table_id}: {len(headers)} cols, {len(rows)} rows | title: {table_title or 'none'}")
                 
         except Exception as e:
             logger.error(f"Error extracting tables from page {page_number}: {e}")
@@ -112,14 +119,47 @@ class PDFExtractor:
             if subject:
                 context_parts.append(f"Subject: {subject}")
         
-        # Extract first page text (first 500 chars for efficiency)
+        # Extract first page text (increased to 1000 chars for better year detection)
         if len(doc) > 0:
             first_page = doc[0]
-            text = first_page.get_text().strip()[:500]
+            text = first_page.get_text().strip()[:1000]
             if text:
                 context_parts.append(f"First page text: {text}")
+                
+                # Extract years from text for explicit year hints
+                import re
+                years_found = re.findall(r'\b(20[2-3][0-9])\b', text)
+                if years_found:
+                    unique_years = sorted(set(years_found))
+                    context_parts.append(f"Years mentioned: {', '.join(unique_years)}")
         
         return " | ".join(context_parts) if context_parts else "No document context available"
+
+    def _extract_table_title(self, page_text: str, table: Any, table_index: int) -> str:
+        """
+        Extract table title from text above the table.
+        Looks for patterns like "Table N:", "Table N -", or nearby text.
+        """
+        import re
+        
+        # Look for "Table N:" or "Table N -" patterns
+        patterns = [
+            rf"Table\s+{table_index}\s*[:\-]\s*([^\n]+)",  # "Table 1: Title"
+            rf"Table\s+{table_index}[^\n]*\n([^\n]+)",     # "Table 1\nTitle"
+            r"Table\s+\d+\s*[:\-]\s*([^\n]+)",             # Any "Table N: Title"
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, page_text, re.IGNORECASE)
+            if match:
+                title = match.group(1).strip()
+                # Clean up common suffixes and extra info
+                title = re.sub(r'\s*\(\d{4}[–—-]\d{4}\)', '', title)  # Remove year ranges like "(2023-2025)"
+                title = title.split('\n')[0]  # Take only first line
+                if len(title) > 5 and len(title) < 100:  # Reasonable title length
+                    return title
+        
+        return None
 
     def _extract_with_ocr(self, page: fitz.Page, page_number: int) -> List[Dict[str, Any]]:
         """Fallback: OCR the page and attempt to find table structure."""
@@ -151,6 +191,7 @@ class PDFExtractor:
             return [{
                 'table_id': table_id,
                 'page_number': page_number,
+                'table_title': None,  # OCR doesn't extract titles separately
                 'headers': headers,
                 'rows': rows,
             }]

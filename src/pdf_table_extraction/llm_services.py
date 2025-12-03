@@ -24,13 +24,14 @@ class TableNormalizer:
         Normalize a table dict (from PDFExtractor) to canonical schema.
         
         Args:
-            table: Dict with keys: table_id, page_number, headers, rows
+            table: Dict with keys: table_id, page_number, table_title (optional), headers, rows
             document_context: Optional context from PDF (title, metadata, first page) for year inference
             
         Returns:
             Tuple of (normalized_rows, notes_list)
         """
         table_id = table.get("table_id", "unknown-table")
+        table_title = table.get("table_title")
         headers = table.get("headers", [])
         rows = table.get("rows", [])
         
@@ -45,10 +46,14 @@ class TableNormalizer:
             "rows": rows
         }
         
+        # Add table title to the data if available
+        if table_title:
+            table_data["table_title"] = table_title
+        
         # Add document context to system prompt if available
         system_prompt = self.prompt
         if document_context:
-            system_prompt += f"\n\n# DOCUMENT CONTEXT\nThe following context was extracted from the PDF document for year inference:\n{document_context}\n\n**Use this context to infer missing years when tables lack explicit year columns or temporal references.**"
+            system_prompt += f"\n\n# DOCUMENT CONTEXT\nThe following context was extracted from the PDF document:\n{document_context}\n\n**IMPORTANT: Search this context for any year references (2024, 2025, 2026, etc.). If the table has no year column, use the year from this context for ALL rows. Do not use 'UNKNOWN' if a year is mentioned in the context.**"
         
         messages = [
             {"role": "system", "content": system_prompt},

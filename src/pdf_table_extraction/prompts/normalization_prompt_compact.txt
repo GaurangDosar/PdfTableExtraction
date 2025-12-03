@@ -2,17 +2,22 @@
 Normalize heterogeneous tables to canonical schema: **type | article | amount | year**
 
 # SCHEMA
-**type** (string): Category. Examples: "Regional Average", "Price Factor", "Monthly Forecast", "Source Projection"
-- Infer from structure: regional prices → "Regional Average", factors → "Price Factor", forecasts → "Monthly Forecast"
+**type** (string): Extract from the **table_title** field in the input JSON if provided (e.g., "Fuel Prices by Region" → "Fuel Prices", "Operational Factors Impact" → "Operational Factors")
+- **ALWAYS use the table_title field when available** - extract the core subject matter and remove generic words like "by Region", "Impact", etc.
+- If table_title is not provided, infer from the data content (e.g., regions with prices → "Regional Prices", quarterly data → "Quarterly Data")
+- DO NOT use generic categories like "Regional Average", "Price Factor", "Monthly Forecast", "Source Projection"
 
 **article** (string): Entity/item. Examples: "US Henry Hub", "Jan Forecast", "EIA"
 - Use geographic/named entities as-is. Simplify temporal: "Jan 2026" → "Jan Forecast"
 
-**amount** (string): Numeric value. Examples: "3.45", "+15%"
-- Remove $€. Clean noise: "4.25(2)" → "4.25". Fix OCR: "2OOO" → "2000", "Consensu\ns" → "Consensus"
+**amount** (string): Numeric value. Examples: "3.45", "15"
+- Remove $€% symbols. Clean noise: "4.25(2)" → "4.25". Fix OCR: "2OOO" → "2000", "Consensu\ns" → "Consensus"
+- For percentages: "15%" → "15", "+20%" → "+20"
 
 **year** (string): 4-digit year or "UNKNOWN". Examples: "2025", "2026"
-- Extract from headers ("2025 Avg"), data ("Jan 2026"), or DOCUMENT CONTEXT. Use "UNKNOWN" as last resort.
+- **Priority order**: 1) Year columns in headers, 2) Year in data values, 3) **DOCUMENT CONTEXT (look for years mentioned in title, text)**, 4) "UNKNOWN" only if no year info exists
+- If table has no year column but DOCUMENT CONTEXT mentions a year (e.g., "2025 forecast", "2026 prediction"), use that year for ALL rows
+- Be aggressive: if context says "2025" anywhere, prefer "2025" over "UNKNOWN"
 
 # MAPPING
 - **One-to-one**: Direct column mapping
@@ -22,23 +27,27 @@ Normalize heterogeneous tables to canonical schema: **type | article | amount | 
 
 # EXAMPLES
 **Ex1: Unpivot** 
+Table Title: "Fuel Prices by Region"
 In: `["Region", "2025", "2026"]`, `["US Hub", "3.45", "4.00"]`
-Out: `[{"type":"Regional Average","article":"US Hub","amount":"3.45","year":"2025"},{"type":"Regional Average","article":"US Hub","amount":"4.00","year":"2026"}]`
+Out: `[{"type":"Fuel Prices","article":"US Hub","amount":"3.45","year":"2025"},{"type":"Fuel Prices","article":"US Hub","amount":"4.00","year":"2026"}]`
 
-**Ex2: Context inference**
-In: `["Factor", "Impact"]`, `["LNG", "+15%"]` + Context:"2026 Avg...2026 Projection"  
-Out: `[{"type":"Price Factor","article":"LNG","amount":"+15%","year":"2026"}]`
+**Ex2: Context inference (no year column)**
+Table Title: "Operational Factors Impact"
+In: `["Factor", "Impact"]`, `["LNG", "+15%"], ["Pipeline", "12%"]` + Context:"Document discusses 2025 forecasts"  
+Out: `[{"type":"Operational Factors","article":"LNG","amount":"+15","year":"2025"},{"type":"Operational Factors","article":"Pipeline","amount":"12","year":"2025"}]`
 
 **Ex3: Noise removal**
+Table Title: "Monthly Forecast"
 In: `["Jan 2026", "4.25(2)"]`
 Out: `{"type":"Monthly Forecast","article":"Jan Forecast","amount":"4.25","year":"2026"}`
 
 # RULES
 1. Output valid JSON array only (no explanatory text)
 2. All values as strings
-3. Clean amounts: remove $€, strip (parenthetical), fix OCR  
-4. Check DOCUMENT CONTEXT (if appended) for year inference
-5. Year priority: headers → data → context → "UNKNOWN"
+3. Clean amounts: remove $€% symbols, strip (parenthetical), fix OCR  
+4. **ALWAYS check DOCUMENT CONTEXT section for year hints** - look for any 4-digit numbers like "2025", "2026"
+5. Year priority: headers → data → **context (aggressively search for years)** → "UNKNOWN" (rare)
+6. If context mentions "2025" and table has no year info, use "2025" for all rows
 
 # OUTPUT
 Process the table below and return ONLY the JSON array.

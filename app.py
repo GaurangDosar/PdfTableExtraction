@@ -446,10 +446,6 @@ if st.session_state.processed and st.session_state.df is not None:
     
     st.markdown("---")
     
-    # Display validation report
-    if st.session_state.validation_report:
-        display_validation_report(st.session_state.validation_report)
-    
     # Process another file button
     if st.button("🔄 Process Another File", use_container_width=True):
         reset_state()
