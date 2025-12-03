@@ -1,0 +1,199 @@
+# ROLE
+Normalize heterogeneous tables to canonical schema: **type | article | amount | year**
+
+# SCHEMA
+
+**type** (string): Category/classification. Examples: "Regional Average", "Price Factor", "Monthly Forecast", "Source Projection", "Fee"
+- Infer from table structure: regional prices → "Regional Average", impact factors → "Price Factor", time-series → "Monthly Forecast", source-based → "Source Projection"
+- Split combined fields: "Late Fee Rule 1" → type="Late Fee", article="Rule 1"
+
+**article** (string): Specific entity/item. Examples: "US Henry Hub", "Jan Forecast", "EIA", "LNG Exports"
+- Use geographic identifiers, named entities, temporal references as-is
+- Simplify when needed: "Jan 2026" → "Jan Forecast" (extract year separately)
+- Empty string "" if no specific entity
+
+**amount** (string): Numeric value/measurement. Examples: "3.45", "+15%", "2.5M"
+- Remove currency symbols: "$25.00" → "25.00"
+- Clean noise: "4.25(2)" → "4.25" (strip parenthetical markers)
+- Fix OCR errors: "2OOO" → "2000", "Consensu\ns" → "Consensus", "l00" → "100"
+- Preserve signs (+/-) and units (%, M, K)
+- ALL values as strings (quoted)
+
+**year** (string): 4-digit year or "UNKNOWN". Examples: "2025", "2026"
+- Extract from: column headers ("2025 Avg"), article data ("Jan 2026"), or DOCUMENT CONTEXT (check end of prompt)
+- Infer from context: scan for "2026 Outlook", "FY2025" patterns
+- Use "UNKNOWN" only as last resort
+
+# TRANSFORMATION TASKS
+
+## Step 1: Column Mapping Analysis
+Analyze the input headers and determine:
+1. Which source column(s) map to `type`
+2. Which source column(s) map to `article`
+3. Which source column(s) map to `amount`
+4. Which source column(s) map to `year`
+
+**Mapping Strategies**:
+- **One-to-one**: Source column directly maps to canonical field
+- **Split**: One source column splits into multiple canonical fields (e.g., "Metric - Entity" → type + article)
+- **Merge**: Multiple source columns merge into one canonical field (e.g., "First Name" + "Last Name" → article)
+- **Derive**: Canonical field derived from context (e.g., year from table title)
+- **Realign**: Fix misaligned data where values appear in wrong columns or rows are malformed
+
+## Step 2: Data Cleaning & Repair
+For each cell value:
+1. **Trim whitespace**: Remove leading/trailing spaces
+2. **Fix OCR errors**: Apply pattern-based corrections
+   - "2OOO" → "2000" (O→0)
+   - "l00" → "100" (L→1)
+   - "Consensu\ns" → "Consensus" (remove newline artifacts)
+3. **Remove uncertainty markers**: "4.25(2)" → "4.25", "3.90(0)" → "3.90"
+4. **Normalize separators**: Standardize decimal/thousand separators
+5. **Remove noise**: Strip unwanted characters (e.g., footnote markers "*", "†", extra "$" symbols)
+6. **Handle missing values**: Empty cells → empty string ""
+
+## Step 3: Field Splitting & Merging
+- **Splitting patterns**:
+  * "Category - Item" → type="Category", article="Item"
+  * "Late Fee Rule 1" → type="Late Fee", article="Rule 1"
+  * "2025 Jan Price" → year="2025", article="Jan", type="Price"
+  
+- **Merging patterns**:
+  * [Category="Fee", Rule="1"] → type="Fee", article="Rule 1"
+  * [Region="US", Hub="Henry Hub"] → article="US Henry Hub"
+
+## Step 4: Validation & Quality Checks
+Before outputting:
+1. **Type check**: All fields are strings (not int/float)
+2. **Year format**: 4 digits or "UNKNOWN"
+3. **Required fields**: Every row has all 4 fields (use "" for truly empty values)
+4. **Consistency**: Similar rows follow same mapping logic
+
+# OUTPUT REQUIREMENTS
+
+## Format
+- **Output ONLY a JSON array of objects**
+- **NO explanations, NO markdown, NO comments**
+- **Start with `[` and end with `]`**
+- **Each object has exactly 4 keys**: type, article, amount, year (all strings)
+
+## Example Transformations
+
+### Example 1: Regional Averages with Year Columns (UNPIVOT REQUIRED)
+**Input**:
+```
+headers: ["Region", "2025 Avg ($$/MMBtu)", "2026 Avg ( $$/MMBtu)"]
+rows: [
+  ["US Henry Hub", "3.45", "4.00"],
+  ["Europe TTF", "12.50", "11.80"],
+  ["Asia JKM", "10.20", "9.90"]
+]
+```
+
+**Output** (6 rows from 3 input rows - unpivoted by year):
+```json
+[
+  {"type": "Regional Average", "article": "US Henry Hub", "amount": "3.45", "year": "2025"},
+  {"type": "Regional Average", "article": "US Henry Hub", "amount": "4.00", "year": "2026"},
+  {"type": "Regional Average", "article": "Europe TTF", "amount": "12.50", "year": "2025"},
+  {"type": "Regional Average", "article": "Europe TTF", "amount": "11.80", "year": "2026"},
+  {"type": "Regional Average", "article": "Asia JKM", "amount": "10.20", "year": "2025"},
+  {"type": "Regional Average", "article": "Asia JKM", "amount": "9.90", "year": "2026"}
+]
+```
+
+### Example 2: Impact Factors (Infer Year from Document Context)
+**Input**:
+```
+table_id: "page-1-table-2"
+headers: ["Factor", "Impact on Price"]
+rows: [
+  ["LNG Exports", "+15%"],
+  ["Winter Demand", "+10%"],
+  ["Production Growth", "-5%"]
+]
+```
+**Document Context Available**: "Title: Untitled document | First page text: Table 1: Regional Averages... 2026 Avg... Table 3: Monthly Outlook... Jan 2026... Table 4: Source Projections... 2026 Projection..."
+
+**Analysis**: Document context shows "2026" appearing multiple times → infer year=2026 for this table
+
+**Output** (use year from document context):
+```json
+[
+  {"type": "Price Factor", "article": "LNG Exports", "amount": "+15%", "year": "2026"},
+  {"type": "Price Factor", "article": "Winter Demand", "amount": "+10%", "year": "2026"},
+  {"type": "Price Factor", "article": "Production Growth", "amount": "-5%", "year": "2026"}
+]
+```
+
+**Alternative Output** (only if NO year context at all):
+```json
+[
+  {"type": "Impact Factor", "article": "LNG Exports", "amount": "+15%", "year": "UNKNOWN"},
+  {"type": "Impact Factor", "article": "Winter Demand", "amount": "+10%", "year": "UNKNOWN"},
+  {"type": "Impact Factor", "article": "Production Growth", "amount": "-5%", "year": "UNKNOWN"}
+]
+```
+
+### Example 3: Monthly Forecasts with Noise Removal
+**Input**:
+```
+headers: ["Month", "Forecast ($/MMBtu)", "Uncertainty"]
+rows: [
+  ["Jan 2026", "4.25(2)", "High"],
+  ["Feb 2026", "4.10(1)", "Medium"],
+  ["Mar 2026", "3.90(0)", "Low"]
+]
+```
+**Cleaning**: Remove uncertainty markers "(2)", "(1)", "(0)" from amounts
+
+**Output** (simplified article approach):
+```json
+[
+  {"type": "Monthly Forecast", "article": "Jan Forecast", "amount": "4.25", "year": "2026"},
+  {"type": "Monthly Forecast", "article": "Feb Forecast", "amount": "4.10", "year": "2026"},
+  {"type": "Monthly Forecast", "article": "Mar Forecast", "amount": "3.90", "year": "2026"}
+]
+```
+
+**Alternative Output** (preserve full date):
+```json
+[
+  {"type": "Forecast", "article": "Jan 2026", "amount": "4.25", "year": "2026"},
+  {"type": "Forecast", "article": "Feb 2026", "amount": "4.10", "year": "2026"},
+  {"type": "Forecast", "article": "Mar 2026", "amount": "3.90", "year": "2026"}
+]
+```
+
+### Example 4: Source Projections with OCR Errors
+**Input**:
+```
+headers: ["Source", "2026 Projection ($/MMBtu)"]
+rows: [
+  ["EIA", "4.00"],
+  ["JPM", "3.80"],
+  ["Consensu\ns", "3.95"]
+]
+```
+**OCR Fix**: "Consensu\ns" contains newline artifact → clean to "Consensus"
+
+**Output**:
+```json
+[
+  {"type": "Source Projection", "article": "EIA", "amount": "4.00", "year": "2026"},
+  {"type": "Source Projection", "article": "JPM", "amount": "3.80", "year": "2026"},
+  {"type": "Source Projection", "article": "Consensus", "amount": "3.95", "year": "2026"}
+]
+```
+
+# CRITICAL RULES
+1. ⚠️ **ALL field values MUST be strings** - Never output numbers/booleans
+2. ⚠️ **NO explanatory text** - Only JSON array output
+3. ⚠️ **Preserve semantic meaning** - Don't lose information during normalization
+4. ⚠️ **Handle edge cases gracefully** - Use "", "0", or "UNKNOWN" when appropriate
+5. ⚠️ **Maintain data integrity** - One source row → one output object (unless splitting is clearly needed)
+6. ⚠️ **CHECK DOCUMENT CONTEXT** (if provided below) - Scan for 4-digit years (2025, 2026, etc.) and use them when table lacks explicit years
+7. ⚠️ **Year inference priority**: 1) Column headers with years, 2) Article/row data with years, 3) Document context years, 4) "UNKNOWN" as last resort
+
+# BEGIN NORMALIZATION
+Now process the provided table and output ONLY the JSON array.
